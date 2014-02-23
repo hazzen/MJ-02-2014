@@ -12,6 +12,11 @@ if (!Array.prototype.findIndex) {
     return -1;
   };
 }
+if (!Math.sign) {
+  Math.sign = function(v) {
+    return v < 0 ? -1 : (v > 0 ? 1 : 0);
+  };
+};
 
 var WIDTH = 640;
 var HEIGHT = 640;
@@ -27,20 +32,21 @@ document.body.appendChild(renderer.domElement);
 
 var scene = new THREE.Scene();
 
-var hemiLight = new THREE.HemisphereLight(0xffffff, 0xffffff, 0.6);
-hemiLight.color.setHSL(0.6, 1, 0.6);
-hemiLight.groundColor.setHSL(0.095, 1, 0.75);
-hemiLight.position.set(0, 500, 0);
-scene.add(hemiLight);
+var ambientLight = new THREE.AmbientLight(0x888888);
+//scene.add(ambientLight);
+
+var directionalLight = new THREE.DirectionalLight(0xffffff, 0.5);
+directionalLight.position.set(1, -1, 1).normalize();
+scene.add(directionalLight);
+
+directionalLight = new THREE.DirectionalLight(0xffffff, 0.5);
+directionalLight.position.set(-1, 1, 1).normalize();
+scene.add(directionalLight);
 
 Object3D.MANAGER = new Object3D.Manager(scene);
 
 var PLAYER = new Ent(new THREE.Vector3(0, 0, 0))
-  .addPart(new Actor(1, 5))
-  .addPart(RectRenderer({
-    r: 1 * 1.8 / 2,
-    mtl: new THREE.MeshBasicMaterial({color: 0x888888}),
-  }));
+  .addPart(new Actor(1, 5));
 
 var ents = [PLAYER];
 
@@ -54,13 +60,17 @@ var LEVEL = new Ent(new THREE.Vector3())
 //  .addPart(new 
 ADD_ENT(LEVEL);
 
+Crawler.MANAGER = new Crawler.Manager(LEVEL.getPart(Level));
+
 LEVEL.addChild(new Ent(new THREE.Vector3(0, 0, -50))
-    .addPart(RectRenderer({
+    .addPart(new Level.Side('-z', {
+      left: '-x',
+      up: 'y',
+    }))
+    .addPart(Object3D.newRectRenderer({
       r: 50,
-      mtl: new THREE.MeshBasicMaterial({
-        transparent: true,
-        opacity: 0.5,
-        color: 0xff0000
+      mtl: new THREE.MeshLambertMaterial({
+        color: 0x888888,
       }),
     })));
 
@@ -70,12 +80,14 @@ LEVEL.addChild(
         new THREE.Quaternion().setFromAxisAngle(
           new THREE.Vector3(1, 0, 0), Math.PI)
     ))
-    .addPart(RectRenderer({
+    .addPart(new Level.Side('z', {
+      left: 'x',
+      up: 'y',
+    }))
+    .addPart(Object3D.newRectRenderer({
       r: 50,
-      mtl: new THREE.MeshBasicMaterial({
-        transparent: true,
-        opacity: 0.5,
-        color: 0xff0000
+      mtl: new THREE.MeshLambertMaterial({
+        color: 0x888888,
       }),
     })));
 
@@ -85,12 +97,14 @@ LEVEL.addChild(
         new THREE.Quaternion().setFromAxisAngle(
           new THREE.Vector3(0, 1, 0), Math.PI / 2)
     ))
-    .addPart(RectRenderer({
+    .addPart(new Level.Side('-x', {
+      left: 'z',
+      up: 'y',
+    }))
+    .addPart(Object3D.newRectRenderer({
       r: 50,
-      mtl: new THREE.MeshBasicMaterial({
-        transparent: true,
-        opacity: 0.5,
-        color: 0xff0000
+      mtl: new THREE.MeshLambertMaterial({
+        color: 0x888888,
       }),
     })));
 
@@ -98,14 +112,16 @@ LEVEL.addChild(
     new Ent(new Transform(
         new THREE.Vector3(50, 0, 0),
         new THREE.Quaternion().setFromAxisAngle(
-          new THREE.Vector3(0, 1, 0), Math.PI / -2)
+          new THREE.Vector3(0, -1, 0), Math.PI / 2)
     ))
-    .addPart(RectRenderer({
+    .addPart(new Level.Side('x', {
+      left: '-z',
+      up: 'y',
+    }))
+    .addPart(Object3D.newRectRenderer({
       r: 50,
-      mtl: new THREE.MeshBasicMaterial({
-        transparent: true,
-        opacity: 0.5,
-        color: 0xff0000
+      mtl: new THREE.MeshLambertMaterial({
+        color: 0x888888,
       }),
     })));
 
@@ -115,12 +131,14 @@ LEVEL.addChild(
         new THREE.Quaternion().setFromAxisAngle(
           new THREE.Vector3(1, 0, 0), Math.PI / 2)
     ))
-    .addPart(RectRenderer({
+    .addPart(new Level.Side('y', {
+      left: '-x',
+      up: 'z',
+    }))
+    .addPart(Object3D.newRectRenderer({
       r: 50,
-      mtl: new THREE.MeshBasicMaterial({
-        transparent: true,
-        opacity: 0.5,
-        color: 0x00ff00,
+      mtl: new THREE.MeshLambertMaterial({
+        color: 0x888888,
       }),
     })));
 
@@ -130,16 +148,16 @@ LEVEL.addChild(
         new THREE.Quaternion().setFromAxisAngle(
           new THREE.Vector3(1, 0, 0), Math.PI / -2)
     ))
-    .addPart(RectRenderer({
+    .addPart(new Level.Side('-y', {
+      left: '-x',
+      up: '-z',
+    }))
+    .addPart(Object3D.newRectRenderer({
       r: 50,
-      mtl: new THREE.MeshBasicMaterial({
-        transparent: true,
-        opacity: 0.5,
-        color: 0x00ff00,
+      mtl: new THREE.MeshLambertMaterial({
+        color: 0x888888,
       }),
     })));
-
-ROTATE = null;
 
 Pidgine.run({
   elem: renderer.domElement,
@@ -163,34 +181,38 @@ Pidgine.run({
     if (MOUSE.buttonPressed(MouseButtons.LEFT)) {
     }
 
-    if (ROTATE) {
-      ROTATE.t -= t;
-      LEVEL.transform.rotation.copy(ROTATE.cur);
-      LEVEL.transform.rotation.slerp(ROTATE.axis, Math.min(1, 1 - ROTATE.t));
-      if (ROTATE.t <= 0) {
-        ROTATE = null;
-      }
-    } else {
-      if (KB.keyPressed(Keys.LEFT)) {
-        ROTATE = new THREE.Quaternion().setFromAxisAngle(
-            new THREE.Vector3(0, 1, 0), Math.PI / 2);
-      } else if (KB.keyPressed(Keys.RIGHT)) {
-        ROTATE = new THREE.Quaternion().setFromAxisAngle(
-            new THREE.Vector3(0, 1, 0), -Math.PI / 2);
-      } else if (KB.keyPressed(Keys.UP)) {
-        ROTATE = new THREE.Quaternion().setFromAxisAngle(
-            new THREE.Vector3(1, 0, 0), -Math.PI / 2);
-      } else if (KB.keyPressed(Keys.DOWN)) {
-        ROTATE = new THREE.Quaternion().setFromAxisAngle(
-            new THREE.Vector3(1, 0, 0), Math.PI / 2);
-      }
-      if (ROTATE) {
-        ROTATE = {axis: ROTATE.multiply(LEVEL.transform.rotation), t: 1, cur: LEVEL.transform.rotation.clone()};
-      }
+    var rotateAxis;
+    if (KB.keyPressed('q')) {
+      LEVEL.addChild(
+          new Ent(new THREE.Vector3(0, 0, 0))
+          .addPart(new Crawler)
+          .addPart(Object3D.newCubeRenderer({
+            r: 3,
+            mtl: new THREE.MeshLambertMaterial({
+              color: 0xf78731,
+            }),
+          })));
+    }
+    if (KB.keyPressed(Keys.LEFT) || KB.keyPressed('a')) {
+      rotateAxis = new THREE.Quaternion().setFromAxisAngle(
+          new THREE.Vector3(0, 1, 0), Math.PI / 2);
+    } else if (KB.keyPressed(Keys.RIGHT) || KB.keyPressed('d')) {
+      rotateAxis = new THREE.Quaternion().setFromAxisAngle(
+          new THREE.Vector3(0, 1, 0), -Math.PI / 2);
+    } else if (KB.keyPressed(Keys.UP) || KB.keyPressed('w')) {
+      rotateAxis = new THREE.Quaternion().setFromAxisAngle(
+          new THREE.Vector3(1, 0, 0), -Math.PI / 2);
+    } else if (KB.keyPressed(Keys.DOWN) || KB.keyPressed('s')) {
+      rotateAxis = new THREE.Quaternion().setFromAxisAngle(
+          new THREE.Vector3(1, 0, 0), Math.PI / 2);
+    }
+    if (rotateAxis) {
+      LEVEL.getPart(Level).rotate(rotateAxis);
     }
 
     ents.forEach(function(e) { e && !e.dead && e.tick(t); });
     Object3D.MANAGER.tick(t);
+    Crawler.MANAGER.tick(t);
     for (var i = 0; i < ents.length; i++) {
       var ent = ents[i];
       if (ent) {

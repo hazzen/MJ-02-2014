@@ -84,7 +84,103 @@ Transform.prototype.globalPosition = function() {
   }
 };
 
+var Crawler = function() {
+  this.side_ = null;
+  this.speed = Math.random() * 20 + 20;
+};
+Crawler.type = 'Crawler';
+
+Crawler.prototype.setEnt = function(e) {
+  this.ent = e;
+};
+
+Crawler.Manager = function(level) {
+  this.level = level;
+  this.crawlers = [];
+  this.lastBack = null;
+};
+
+Crawler.Manager.prototype.addEnt = function(ent) {
+  this.crawlers.push(ent.getPart(Crawler));
+
+  var back = this.lastBack.getPart(Level.Side);
+  var along = back.along.clone();
+  along.x *= Math.random() * 50 - 25;
+  along.y *= Math.random() * 50 - 25;
+  along.z *= Math.random() * 50 - 25;
+  ent.transform.position.copy(back.ent.transform.position);
+  ent.transform.position.add(along);
+  ent.getPart(Crawler).side_ = back;
+};
+
+Crawler.Manager.prototype.removeEnt = function(ent) {
+  var crawler = ent.getPart(Object3D);
+  var index = this.crawlers.indexOf(crawler);
+  if (index == -1) {
+    throw 'BAD!';
+  }
+  this.crawlers.splice(index, 1);
+};
+
+
+Crawler.Manager.prototype.tick = function(t) {
+  var back = this.level.getBack();
+  if (back) {
+    this.lastBack = back;
+  }
+  if (!this.lastBack) return;
+  back = this.lastBack.getPart(Level.Side);
+  var front = this.level.getSideWithDir(back.opposite);
+  var frontGlobal = front.ent.transform.globalPosition();
+
+  for (var i = 0; i < this.crawlers.length; i++) {
+    var crawler = this.crawlers[i];
+    var toFrontGlobal = new THREE.Vector3().subVectors(
+        crawler.ent.transform.globalPosition(),
+        frontGlobal);
+    var toFront = new THREE.Vector3().subVectors(
+        front.ent.transform.position,
+        crawler.ent.transform.position);
+    var along = crawler.side_.along;
+    for (var nb in crawler.side_.neighbours_) {
+      var dir = crawler.side_.neighbours_[nb];
+      if (dir == back.opposite) {
+        along = crawler.side_.along;
+        break;
+      }
+    }
+    if (nb == 'opposite') {
+      toFront.multiplyScalar(-1);
+    }
+    if (!along.x) {
+      toFront.x = 0;
+    }
+    if (!along.y) {
+      toFront.y = 0;
+    }
+    if (!along.z) {
+      toFront.z = 0;
+    }
+    toFront.setLength(crawler.speed * t);
+    crawler.ent.transform.position.add(toFront);
+    var pos = crawler.ent.transform.position;
+
+    var doDir = function(d) {
+      if (toFront[d]) {
+        if (Math.abs(pos[d]) > 50) {
+          pos[d] = Math.sign(pos[d]) * 50;
+          crawler.side_ = this.level.getSideWithDir(pos[d] > 0 ? d : ('-' + d));
+        }
+      }
+    }.bind(this);
+    doDir('x');
+    doDir('y');
+    doDir('z');
+  }
+};
+
 var Level = function() {
+  this.rotate_ = null;
 };
 Level.type = 'Level';
 
@@ -92,12 +188,114 @@ Level.prototype.setEnt = function(e) {
   this.ent = e;
 };
 
-Level.Side = function() {
+Level.prototype.getSideWithDir = function(d) {
+  for (var i = 0; i < this.ent.transform.children.length; i++) {
+    var side = this.ent.transform.children[i].ent.getPart(Level.Side);
+    if (side.dir == d) {
+      return side;
+    }
+  }
+};
+
+Level.prototype.getBack = function() {
+  if (this.rotate_) return null;
+  var back = new THREE.Vector3(0, 0, -50);
+  for (var i = 0; i < this.ent.transform.children.length; i++) {
+    var child = this.ent.transform.children[i];
+    var pos = child.globalPosition();
+    var d = Math.abs(pos.x - back.x) +
+            Math.abs(pos.y - back.y) +
+            Math.abs(pos.z - back.z);
+    if (d < EPSILON) {
+      return child.ent;
+    }
+  }
+  return null;
+};
+
+Level.prototype.rotate = function(axis) {
+  if (this.rotate_) return;
+  this.rotate_ = {
+    axis: new THREE.Quaternion().multiplyQuaternions(axis, this.ent.transform.rotation),
+    cur: this.ent.transform.rotation.clone(),
+    t: 1,
+  };
+  //this.getBack().getPart(Object3D).obj.material.color = 0xffffff;
+};
+
+Level.prototype.tick = function(t) {
+  if (this.rotate_) {
+    var rot = this.rotate_;
+    rot.t -= t;
+    this.ent.transform.rotation.copy(rot.cur);
+    this.ent.transform.rotation.slerp(rot.axis, Math.min(1, 1 - rot.t));
+    if (rot.t <= 0) {
+      this.rotate_ = null;
+      //this.getBack().getPart(Object3D).obj.material.color = 0xff0000;
+    }
+  }
+};
+
+Level.Side = function(dir, alongs) {
+  this.dir = dir;
+  this.neighbours_ = [];
+  this.along = new THREE.Vector3(0, 0, 0);
+
+  var handleDir = function(d, vec) {
+    var v = 1;
+    if (d[0] == '-') {
+      v = -1;
+      d = d.substr(1);
+    }
+    if (d == 'x') {
+      vec.x = v;
+    } else if (d == 'y') {
+      vec.y = v;
+    } else {
+      vec.z = v;
+    }
+    return vec;
+  };
+  handleDir(alongs.left, this.along);
+  handleDir(alongs.up, this.along);
+
+  var opposite = function(d) {
+    if (d[0] == '-') {
+      return d.substr(1);
+    } else {
+      return '-' + d;
+    }
+  };
+
+  this.neighbours_.left = alongs.left;
+  this.neighbours_.right = opposite(alongs.left);
+  this.neighbours_.up = alongs.up;
+  this.neighbours_.down = opposite(alongs.up);
+  this.neighbours_.opposite = opposite(this.dir);
+
+  this.neighbourDs_ = {};
+  for (var nb in this.neighbours_) {
+    var dir = this.neighbours_[nb];
+    var v = new THREE.Vector3();
+    handleDir(dir, v);
+    this.neighbourDs_[nb] = v;
+  }
+  this.neighbourDs_.opposite.copy(this.along);
+  this.opposite = this.neighbours_.opposite;
+
   this.occupants = [];
 };
 Level.Side.type = 'Level.Side';
 
 Level.Side.prototype.setEnt = function(e) {
+  this.ent = e;
+  if (e.transform.position.x) {
+    this.along.x = 0;
+  } else if (e.transform.position.y) {
+    this.along.y = 0;
+  } else if (e.transform.position.z) {
+    this.along.z = 0;
+  }
 };
 
 var Actor = function() {
@@ -114,7 +312,20 @@ Actor.prototype.applyImpulse = function(force) {
 Actor.prototype.tick = function(t) {
 };
 
-var RectRenderer = function(opts) {
+var Object3D = function(obj) {
+  this.obj = obj;
+};
+Object3D.type = 'Object3D';
+
+Object3D.newCubeRenderer = function(opts) {
+  var r = opts.r;
+  var geom = new THREE.CubeGeometry(r, r, r);
+  var mtl = opts.mtl || new THREE.MeshBasicMaterial({color: 0xff0000});
+
+  return new Object3D(new THREE.Mesh(geom, mtl));
+};
+
+Object3D.newRectRenderer = function(opts) {
   var r = opts.r;
   var geom = new THREE.Geometry();
   geom.vertices.push(new THREE.Vector3(-r, -r, 0));
@@ -123,16 +334,13 @@ var RectRenderer = function(opts) {
   geom.vertices.push(new THREE.Vector3( r,  r, 0));
   geom.faces.push(new THREE.Face3(0, 2, 1));
   geom.faces.push(new THREE.Face3(1, 2, 3));
+  geom.computeFaceNormals();
+  geom.computeVertexNormals();
 
   var mtl = opts.mtl || new THREE.MeshBasicMaterial({color: 0xff0000});
 
   return new Object3D(new THREE.Mesh(geom, mtl));
 };
-
-var Object3D = function(obj) {
-  this.obj = obj;
-};
-Object3D.type = 'Object3D';
 
 Object3D.prototype.setEnt = function(ent) {
   this.ent = ent;
@@ -156,9 +364,7 @@ Object3D.Manager = function(scene) {
 };
 
 Object3D.Manager.prototype.addEnt = function(ent) {
-  this.objs.push({
-    obj3d: ent.getPart(Object3D),
-  });
+  this.objs.push(ent.getPart(Object3D));
   if (!ent.getPart(Object3D).obj.parent) {
     this.scene.add(ent.getPart(Object3D).obj);
   }
@@ -258,9 +464,9 @@ Ent.prototype.tick = function(t) {
 
 exports.Actor = Actor;
 exports.Ent = Ent;
-exports.RectRenderer = RectRenderer;
 exports.Object3D = Object3D;
 exports.Transform = Transform;
 exports.Level = Level;
+exports.Crawler = Crawler;
 
 })(window);
